@@ -1,0 +1,118 @@
+@import "tailwindcss";
+
+/* public/fonts/GT-Eesti — khớp Flutter Master-Mouse (Text trial) */
+@font-face {
+  font-family: "GT-Eesti";
+  src: url("/fonts/GT-Eesti/GT-Eesti-Text-UltraLight-Trial.otf")
+    format("opentype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT-Eesti";
+  src: url("/fonts/GT-Eesti/GT-Eesti-Text-Thin-Trial.otf") format("opentype");
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT-Eesti";
+  src: url("/fonts/GT-Eesti/GT-Eesti-Text-Light-Trial.otf") format("opentype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT-Eesti";
+  src: url("/fonts/GT-Eesti/GT-Eesti-Text-Regular-Trial.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT-Eesti";
+  src: url("/fonts/GT-Eesti/GT-Eesti-Text-Medium-Trial.otf") format("opentype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "GT-Eesti";
+  src: url("/fonts/GT-Eesti/GT-Eesti-Text-Bold-Trial.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Login — khớp Master-Mouse login_section (SlideEffect) + login_cta (ShimmerEffect) */
+@keyframes ab-login-slide {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes ab-login-shimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(220%);
+  }
+}
+
+@theme {
+  --color-ab-primary: #a2eee7;
+  --color-ab-bg: #161616;
+  --color-ab-accent: #232323;
+  --color-ab-tertiary: #666666;
+  --color-ab-input: #2d2d2d;
+  --color-ab-text-gray: #494949;
+  --color-ab-progress: #17c36a;
+  --color-ab-bg-light: #2f2b33;
+  --color-ab-error: #ff6b6b;
+  --font-sans: "GT-Eesti", ui-sans-serif, system-ui, sans-serif;
+  --font-montserrat: "GT-Eesti", ui-sans-serif, sans-serif;
+  --animate-scroll-hint: scroll-hint-bounce 1.2s ease-in-out infinite;
+  /* easeInOutQuart ≈ cubic-bezier(0.76, 0, 0.24, 1) */
+  --animate-ab-login-slide: ab-login-slide 1s cubic-bezier(0.76, 0, 0.24, 1) both;
+  --animate-ab-login-shimmer: ab-login-shimmer 5s cubic-bezier(0.76, 0, 0.24, 1)
+    infinite;
+}
+
+@keyframes install-indeterminate {
+  0% {
+    transform: translateX(-30%);
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(130%);
+    opacity: 0.7;
+  }
+}
+
+@keyframes scroll-hint-bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.65;
+  }
+  50% {
+    transform: translateY(4px);
+    opacity: 1;
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply m-0 h-full bg-ab-bg font-sans text-white antialiased;
+  }
+}
