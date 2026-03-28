@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AssetBender",
+  "version": "0.0.1",
+  "identifier": "com.assetbender.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "AssetBender",
+        "width": 900,
+        "height": 710,
+        "minWidth": 900,
+        "minHeight": 710,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "nameapp"
+        ]
+      }
+    },
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/cuonglamphu/Assetbender-DesktopApp/releases/latest/download/latest.json"
+      ],
+      "pubkey": "RWS3gEgLSyeV6pLMQxA88qi7UJtuwcD3Atserdkh65a16xIq+drTRxrkW"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

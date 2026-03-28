@@ -1,0 +1,36 @@
+[package]
+name = "assetbender-mac"
+version = "0.0.1"
+description = "AssetBender desktop client"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "assetbender_mac_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-store = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+url = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rand = "0.8"
+sha2 = "0.10"
+base64 = "0.22"
+dirs = "5"
+thiserror = "1"
+zip = "2"
+gethostname = "0.5"
+log = "0.4"
+env_logger = "0.11"

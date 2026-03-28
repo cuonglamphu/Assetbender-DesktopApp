@@ -1,0 +1,79 @@
+# Release + auto-update: build đa nền tảng, upload GitHub Release + latest.json (Tauri updater).
+# Cần GitHub secrets:
+#   TAURI_SIGNING_PRIVATE_KEY — nội dung private key (hoặc base64), khớp pubkey trong tauri.conf.json
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — (tuỳ chọn) nếu key có mật khẩu
+# Tag: git tag v0.1.0 && git push origin v0.1.0
+# Trước release lần đầu: thay pubkey trong tauri.conf.json bằng pubkey khớp secret (pnpm exec tauri signer generate).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point updater to this repository
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const path = "src-tauri/tauri.conf.json";
+          let s = fs.readFileSync(path, "utf8");
+          s = s.replace(/OWNER\/REPO/g, process.env.GITHUB_REPOSITORY);
+          fs.writeFileSync(path, s);
+          NODE
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: .
+          tauriScript: pnpm exec tauri
+          tagName: ${{ github.ref_name }}
+          releaseName: AssetBender ${{ github.ref_name }}
+          releaseBody: "Installers and latest.json for the Tauri updater. See https://v2.tauri.app/plugin/updater/"
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+          args: ${{ matrix.args }}
