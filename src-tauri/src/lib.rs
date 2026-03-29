@@ -645,6 +645,37 @@ async fn fetch_plugins_and_packs(product_type: String) -> Result<PluginsAndPacks
     })
 }
 
+/// Ghi log **terminal** (Rust) cho policy + force/soft — `console.info` trong WebView không ra đây.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateCheckLogPayload {
+    #[serde(default)]
+    phase: Option<String>,
+    outcome: String,
+    app_version: Option<String>,
+    minimum_version: Option<String>,
+    below_minimum: bool,
+    force_update: bool,
+    updater_target: Option<String>,
+    policy_ok: bool,
+}
+
+#[tauri::command]
+fn log_update_check(payload: UpdateCheckLogPayload) {
+    let phase = payload.phase.as_deref().unwrap_or("check");
+    log::info!(
+        "[update][{}] outcome={} app={:?} min={:?} below_min={} force={} updater={:?} policy_ok={}",
+        phase,
+        payload.outcome,
+        payload.app_version,
+        payload.minimum_version,
+        payload.below_minimum,
+        payload.force_update,
+        payload.updater_target,
+        payload.policy_ok
+    );
+}
+
 /// Kiểm tra bản cập nhật qua [tauri-plugin-updater] (GitHub Releases + `latest.json` từ CI).
 #[tauri::command]
 async fn check_app_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
@@ -658,8 +689,8 @@ async fn check_app_update(app: tauri::AppHandle) -> Result<Option<String>, Strin
 }
 
 fn init_logging() {
-    // `tauri_plugin_updater=debug` → log dòng "checking for updates {url}" từ plugin.
-    let default = "info,tauri_plugin_updater=debug,reqwest=warn";
+    // `warn`: bớt spam DEBUG từ plugin khi JS gọi `check()` (xem log policy/force qua `log_update_check`).
+    let default = "info,tauri_plugin_updater=warn,reqwest=warn";
     let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default))
         .format_timestamp_secs()
         .try_init();
@@ -833,7 +864,8 @@ pub fn run() {
             get_installed_manifest,
             uninstall_plugin,
             uninstall_pack,
-            check_app_update
+            check_app_update,
+            log_update_check
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -9,11 +9,33 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+/** Playwright: `VITE_E2E=1 pnpm run build` — mock Tauri modules for browser E2E. */
+const e2e = process.env.VITE_E2E === "1";
+
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      ...(e2e
+        ? {
+            "@tauri-apps/api/app": path.resolve(__dirname, "./src/e2e/mocks/app.ts"),
+            "@tauri-apps/api/core": path.resolve(__dirname, "./src/e2e/mocks/core.ts"),
+            "@tauri-apps/api/event": path.resolve(__dirname, "./src/e2e/mocks/event.ts"),
+            "@tauri-apps/plugin-updater": path.resolve(
+              __dirname,
+              "./src/e2e/mocks/updater.ts",
+            ),
+            "@tauri-apps/plugin-process": path.resolve(
+              __dirname,
+              "./src/e2e/mocks/process.ts",
+            ),
+            "@tauri-apps/plugin-opener": path.resolve(
+              __dirname,
+              "./src/e2e/mocks/opener.ts",
+            ),
+          }
+        : {}),
     },
   },
   plugins: [react(), tailwindcss()],

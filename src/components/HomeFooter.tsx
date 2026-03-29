@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { AboutDialog } from "@/components/AboutDialog";
 import { cn } from "@/lib/utils";
 
 const MENU_PAD = 8; /* p-2 */
@@ -13,7 +14,7 @@ const MENU_ITEM_H = 50;
 const MENU_GAP = 4; /* h-1 spacer */
 const MENU_WIDTH = 200 + MENU_PAD * 2;
 const MENU_HEIGHT =
-  MENU_PAD * 2 + MENU_ITEM_H * 3 + MENU_GAP * 2;
+  MENU_PAD * 2 + MENU_ITEM_H * 4 + MENU_GAP * 3;
 const GAP_ABOVE = 8;
 const OFFSET_X = 5;
 
@@ -34,6 +35,7 @@ export function HomeFooter({
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [menuMounted, setMenuMounted] = useState(false);
   const [menuEntered, setMenuEntered] = useState(false);
   const [menuPos, setMenuPos] = useState<{ left: number; top: number } | null>(
@@ -174,6 +176,18 @@ export function HomeFooter({
               className={secondaryMenuRowClass}
               onClick={() => {
                 setOpen(false);
+                setAboutOpen(true);
+              }}
+            >
+              About
+            </button>
+            <div className="h-1" aria-hidden />
+            <button
+              type="button"
+              role="menuitem"
+              className={secondaryMenuRowClass}
+              onClick={() => {
+                setOpen(false);
                 onLogout();
               }}
             >
@@ -191,6 +205,7 @@ export function HomeFooter({
         "bg-ab-accent",
       )}
     >
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       {menuPortal}
 
       <div className="relative z-[1] flex min-w-0 items-center gap-[18px]">

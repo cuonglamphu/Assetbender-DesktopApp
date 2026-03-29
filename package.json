@@ -1,7 +1,7 @@
 {
   "name": "assetbender-mac",
   "private": true,
-  "version": "0.0.25",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,7 +16,7 @@
     "release": "node scripts/release.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "pnpm run build && playwright test",
+    "test:e2e": "playwright test",
     "test:e2e:quick": "playwright test"
   },
   "dependencies": {

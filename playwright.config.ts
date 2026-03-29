@@ -1,11 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const port = 4173;
-const baseURL = `http://localhost:${port}`;
+const vitePort = 4173;
+/** Khớp `VITE_FRONTEND_URL` khi build E2E — policy URL (Playwright có thể `route.fulfill` không cần process lắng :3002). */
+const policyOrigin = "http://localhost:3002";
+const baseURL = `http://localhost:${vitePort}`;
 
 /**
- * E2E: chạy trên bản đã build (`vite preview`) — giống người dùng tải static bundle.
- * Trình duyệt không có Tauri; app rơi vào Login sau khi session_get lỗi.
+ * Shell web (`vite preview`) + build `VITE_E2E=1` (mock Tauri trong `vite.config.ts`).
+ * Muốn policy thật từ Next: chạy `Assetsflow-Frontend` `pnpm run dev` (:3002) — không bắt buộc nếu test dùng `route.fulfill`.
  */
 export default defineConfig({
   testDir: "./e2e",
@@ -20,9 +22,14 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm exec vite preview --port ${port} --strictPort`,
+    command: `pnpm run build && pnpm exec vite preview --port ${vitePort} --strictPort`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 180_000,
+    env: {
+      ...process.env,
+      VITE_E2E: "1",
+      VITE_FRONTEND_URL: policyOrigin,
+    },
   },
 });

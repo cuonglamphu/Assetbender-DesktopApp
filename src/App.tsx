@@ -25,13 +25,10 @@ function Shell() {
   }
 
   return (
-    <>
-      <AppUpdateDialog />
-      <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
@@ -39,6 +36,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
+        <AppUpdateDialog />
         <div className="h-full min-h-0">
           <Shell />
         </div>

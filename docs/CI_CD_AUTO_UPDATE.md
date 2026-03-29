@@ -196,6 +196,26 @@ Giữ **cùng cặp khóa ký** (minisign) giữa CI và `pubkey` trong app. R2 
 | `latest.json` sai asset | Xem [tauri-action](https://github.com/tauri-apps/tauri-action) và `updaterJsonPreferNsis` (Windows). |
 | Monorepo | Chỉnh `projectPath`, đường dẫn `pnpm-lock.yaml`, và bước replace `tauri.conf.json` cho đúng thư mục `src-tauri`. |
 
+## Force update và soft update (`update-policy.json`)
+
+App fetch JSON tại `{VITE_FRONTEND_URL}/updater/update-policy.json` (hoặc override env `VITE_UPDATE_POLICY_URL`). Nội dung gợi ý:
+
+```json
+{
+  "minimumVersion": "0.0.20",
+  "forceMessage": "Optional text shown when the app is below minimum and cannot download yet.",
+  "softUpdatePrompt": true
+}
+```
+
+| Trường | Ý nghĩa |
+|--------|---------|
+| `minimumVersion` | Nếu version cài đặt **&lt;** giá trị này → **force update**: dialog chặn (không đóng, không “Later”), bắt buộc cài qua updater hoặc Retry / mở website nếu không tải được manifest. |
+| `forceMessage` | Tuỳ chọn: thêm mô tả khi ở trạng thái chặn mà chưa có gói cập nhật. |
+| `softUpdatePrompt` | Mặc định `true`. Nếu `false`, app **không** tự mở dialog “có bản mới” khi user **đã** ≥ `minimumVersion` (vẫn có thể kiểm tra tay qua `check_app_update` nếu có UI). |
+
+Luồng **soft**: có bản mới trên `latest.json`, user không nằm dưới `minimumVersion` → dialog có nút **Later**. Luồng **force**: version hiện tại &lt; `minimumVersion` → bắt buộc cập nhật.
+
 ## Test auto-update
 
 ### Đồng bộ version (tránh lệch tag / installer / manifest)

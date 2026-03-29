@@ -131,7 +131,7 @@ pub async fn log_updater_endpoint_probe(app: &AppHandle) {
                 let body = res.text().await.unwrap_or_default();
                 let snip: String = body.chars().take(600).collect();
                 if status.is_success() {
-                    log::info!(
+                    log::debug!(
                         "[updater] probe OK: GET {url_str} -> HTTP {} {} | content-type: {ct} | body_prefix: {snip:?}",
                         status.as_u16(),
                         status.canonical_reason().unwrap_or("")
