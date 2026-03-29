@@ -39,17 +39,18 @@ Tạo bucket và API token trong [Cloudflare Dashboard](https://dash.cloudflare.
 | `R2_ACCESS_KEY_ID` | Khi tạo **R2 API token** (quyền đọc/ghi object trên bucket đích). | Giống “Access Key ID” của token. |
 | `R2_SECRET_ACCESS_KEY` | Cùng lúc tạo API token (chỉ hiện một lần — lưu ngay). | Giống “Secret Access Key”. |
 | `R2_BUCKET` | Tên bucket bạn tạo trong R2 (ví dụ `assetbender-updates`). | Chỉ tên bucket, không có `s3://`. |
-| `R2_PUBLIC_BASE_URL` | **Không** phải key trong Cloudflare — đây là **URL HTTPS công khai** bạn cấu hình trỏ vào bucket (Custom Domain trên R2, hoặc URL public `*.r2.dev` nếu bật). Ví dụ `https://updates.yourdomain.com` (không `/` cuối). | Dùng để script viết lại `platforms.*.url` trong `latest.json`. Phải khớp cách file được phục vụ qua HTTPS (path `/<prefix>/<tag>/filename`). |
 
-Nếu **thiếu** bất kỳ secret R2 nào trong nhóm `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`, job **upload-r2** sẽ **không chạy** (điều kiện `if` trong workflow).
+GitHub **không** cho dùng `secrets` trong biểu thức `if` của job theo cách một số workflow viết — job **upload-r2** bật bằng **Variable** `R2_UPLOAD_ENABLED=true` (không dùng secret trong `if`).
 
-#### Variables (tuỳ chọn)
+#### Variables (tuỳ chọn — R2 mirror + rewrite manifest)
 
 Cùng trang **Secrets and variables → Actions** → tab **Variables**.
 
 | Variable | Giá trị | Ghi chú |
 |----------|---------|---------|
-| `R2_PREFIX` | Chuỗi prefix, mặc định trong workflow là `assetbender` nếu không đặt. | Dùng cho path trên bucket và trong URL CDN: `…/assetbender/v1.0.0/…`. |
+| `R2_UPLOAD_ENABLED` | Đặt `true` để **chạy** job upload R2 sau release. Không đặt hoặc khác `true` → job bị bỏ qua. | Bắt buộc nếu muốn mirror; kết hợp với secrets R2 ở trên. |
+| `R2_PUBLIC_BASE_URL` | URL HTTPS **công khai** trỏ vào bucket (Custom Domain / `*.r2.dev`). Ví dụ `https://updates.yourdomain.com` (không `/` cuối). | Dùng trong `if` bước rewrite + env script (nên là **Variable**, không cần Secret). |
+| `R2_PREFIX` | Chuỗi prefix, mặc định trong workflow là `assetbender` nếu không đặt. | Path trên bucket và URL CDN: `…/assetbender/v1.0.0/…`. |
 
 #### Trong code (không phải GitHub Secret)
 
@@ -165,24 +166,18 @@ Client đã cài app cũ sẽ lấy `latest.json` từ URL trong `tauri.conf.jso
 
 Phù hợp khi **repo GitHub private** (CI vẫn build và ký bằng secret) nhưng updater cần URL **HTTPS công khai** ổn định, không phụ thuộc `github.com/.../releases/latest/download/latest.json` (draft, quyền asset, hoặc muốn CDN).
 
-Workflow **Release** (`.github/workflows/release.yml`) có job **`upload-r2`** (chạy sau khi verify có `latest.json`): tải toàn bộ asset của release GitHub bằng `gh release download`, rồi đẩy lên R2 bằng **AWS CLI** (S3-compatible). Job **chỉ chạy** nếu đủ secrets:
+Workflow **Release** (`.github/workflows/release.yml`) có job **`upload-r2`** (chạy sau khi verify có `latest.json`): tải toàn bộ asset của release GitHub bằng `gh release download`, rồi đẩy lên R2 bằng **AWS CLI** (S3-compatible). Job **chỉ chạy** khi biến repo **`R2_UPLOAD_ENABLED=true`** (và bạn đã cấu hình secrets R2).
 
-| Secret | Ý nghĩa |
-|--------|---------|
-| `R2_ACCOUNT_ID` | ID tài khoản Cloudflare (dùng trong endpoint `https://<ID>.r2.cloudflarestorage.com`) |
-| `R2_ACCESS_KEY_ID` | API token R2 (access key) |
-| `R2_SECRET_ACCESS_KEY` | API token R2 (secret) |
-| `R2_BUCKET` | Tên bucket **chỉ** tên bucket (không có `s3://`) |
-| `R2_PUBLIC_BASE_URL` | (Khuyến nghị) Origin HTTPS công khai trỏ vào bucket, **không** có `/` cuối — ví dụ `https://updates.example.com`. Dùng để **viết lại** nội dung `latest.json`: mỗi `platforms.*.url` đổi từ link GitHub sang `…/<R2_PREFIX>/<tag>/<tên-file-giống-release>`. Trường `signature` giữ nguyên (cùng file binary đã mirror). |
+**Secrets R2:** `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` — ý nghĩa giống bảng tra cứu ở trên.
 
-Tuỳ chọn (biến repo **Variables**): `R2_PREFIX` — prefix trong bucket và trong URL CDN (mặc định `assetbender`).
+**Variables:** `R2_PUBLIC_BASE_URL` (URL công khai, rewrite `latest.json`), `R2_PREFIX` (mặc định `assetbender`).
 
 **Đường dẫn trên R2 sau mỗi tag `v1.2.3`:**
 
 - `s3://<bucket>/<R2_PREFIX>/v1.2.3/` — toàn bộ file đã tải từ release (installer, `.sig`, …).
 - `s3://<bucket>/<R2_PREFIX>/latest.json` — manifest (sau bước rewrite nếu có `R2_PUBLIC_BASE_URL`), ghi đè mỗi release.
 
-**Nội dung `latest.json`:** job chạy script `scripts/rewrite-updater-manifest-for-r2.mjs` khi secret `R2_PUBLIC_BASE_URL` được đặt. Script chỉ thay **URL tải** cho từng nền tải; `version`, `notes`, `pub_date`, `signature` giữ như bản Tauri tạo. Bạn cần cấu hình DNS / R2 public access sao cho URL dạng  
+**Nội dung `latest.json`:** job chạy script `scripts/rewrite-updater-manifest-for-r2.mjs` khi **variable** `R2_PUBLIC_BASE_URL` không rỗng. Script chỉ thay **URL tải** cho từng nền tải; `version`, `notes`, `pub_date`, `signature` giữ như bản Tauri tạo. Bạn cần cấu hình DNS / R2 public access sao cho URL dạng  
 `https://<R2_PUBLIC_BASE_URL>/<R2_PREFIX>/<tag>/<filename>`  
 trả đúng object đã upload (trùng tên file với asset trên GitHub).
 

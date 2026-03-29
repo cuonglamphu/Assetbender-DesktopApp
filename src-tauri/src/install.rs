@@ -125,6 +125,7 @@ pub fn extract_zip(zip_path: &Path, out_dir: &Path) -> Result<Vec<String>, Strin
     Ok(extracted)
 }
 
+#[cfg(windows)]
 pub fn looks_like_permission_denied(err: &str) -> bool {
     let e = err.to_lowercase();
     e.contains("permission denied")
@@ -221,6 +222,7 @@ pub fn temp_zip_path() -> PathBuf {
     ))
 }
 
+#[cfg(windows)]
 pub fn temp_elev_result_path() -> PathBuf {
     std::env::temp_dir().join(format!(
         "assetbender-elev-result-{}.json",

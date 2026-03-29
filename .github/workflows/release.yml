@@ -3,9 +3,10 @@
 #   TAURI_SIGNING_PRIVATE_KEY — nội dung private key (hoặc base64), khớp pubkey trong tauri.conf.json
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — (tuỳ chọn) nếu key có mật khẩu
 # Tuỳ chọn — mirror release lên Cloudflare R2 (job upload-r2):
-#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (tên bucket)
-#   R2_PUBLIC_BASE_URL — URL HTTPS công khai trỏ tới bucket (vd. https://updates.example.com), để viết lại platforms.*.url trong latest.json
-# Tuỳ chọn — biến repo R2_PREFIX (mặc định assetbender): prefix trong bucket + trong URL CDN
+#   Biến repo R2_UPLOAD_ENABLED=true để bật job (if không dùng secrets — tránh lỗi validator GitHub).
+#   Secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+#   Biến repo R2_PUBLIC_BASE_URL — URL HTTPS công khai (vd. https://updates.example.com), rewrite latest.json
+#   Biến repo R2_PREFIX (mặc định assetbender): prefix trong bucket + URL CDN
 # Tag: git tag v0.1.0 && git push origin v0.1.0
 # Trước release lần đầu: thay pubkey trong tauri.conf.json bằng pubkey khớp secret (pnpm exec tauri signer generate).
 # Nếu commit `.tauri/updater.key.pub`, workflow sẽ chạy `pnpm run pubkey:sync` trước build để pubkey trong JSON khớp file .pub.
@@ -127,7 +128,7 @@ jobs:
     name: Mirror release to Cloudflare R2
     needs: verify-release-has-updater-json
     runs-on: ubuntu-latest
-    if: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_BUCKET != '' && secrets.R2_ACCOUNT_ID != '' }}
+    if: ${{ vars.R2_UPLOAD_ENABLED == 'true' }}
     permissions:
       contents: read
     env:
@@ -146,9 +147,9 @@ jobs:
           gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
 
       - name: Point latest.json URLs to CDN (R2 public URL)
-        if: ${{ secrets.R2_PUBLIC_BASE_URL != '' }}
+        if: ${{ vars.R2_PUBLIC_BASE_URL != '' }}
         env:
-          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
           R2_PREFIX: ${{ vars.R2_PREFIX }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           LATEST_JSON_PATH: release-assets/latest.json
