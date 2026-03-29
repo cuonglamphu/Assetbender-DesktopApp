@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AssetBender",
-  "version": "0.0.18",
+  "version": "0.0.21",
   "identifier": "com.assetbender.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
