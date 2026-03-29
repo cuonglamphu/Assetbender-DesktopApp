@@ -1,5 +1,5 @@
 # CI: frontend (Vite/TS) + Rust (clippy/test). Repo root = thư mục chứa package.json (assetbender-mac).
-# Cache: setup-node cache: pnpm (pnpm-lock.yaml); job rust dùng Swatinem/rust-cache (src-tauri).
+# Cache: setup-node cache: pnpm (pnpm-lock.yaml); rust job: Swatinem/rust-cache workspaces src-tauri -> target.
 # Monorepo: đặt workflows ở root repo và thêm defaults.run.working-directory: assetbender-mac cho mỗi job.
 
 name: CI
@@ -13,6 +13,9 @@ on:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: read
@@ -30,7 +33,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -50,7 +53,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -71,7 +74,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri -> target
 
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets

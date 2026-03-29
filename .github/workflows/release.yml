@@ -10,7 +10,9 @@
 # Tag: git tag v0.1.0 && git push origin v0.1.0
 # Trước release lần đầu: thay pubkey trong tauri.conf.json bằng pubkey khớp secret (pnpm exec tauri signer generate).
 # Nếu commit `.tauri/updater.key.pub`, workflow sẽ chạy `pnpm run pubkey:sync` trước build để pubkey trong JSON khớp file .pub.
-# Cache: setup-node cache: pnpm (pnpm-lock.yaml) + Swatinem/rust-cache (src-tauri, key theo matrix target).
+# Cache (2 lớp — khuyến nghị Tauri + pnpm):
+#   - actions/setup-node cache: pnpm + cache-dependency-path: pnpm-lock.yaml (commit lockfile)
+#   - Swatinem/rust-cache@v2: workspaces src-tauri -> target; prefix-key release + key matrix target
 
 name: Release
 
@@ -18,6 +20,10 @@ on:
   push:
     tags:
       - "v*"
+
+# JS actions (checkout/setup-node/pnpm) dùng Node 24 — tránh cảnh báo deprecation Node 20 (GitHub 2026).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: write
@@ -63,7 +69,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
@@ -74,8 +80,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: release
-          workspaces: src-tauri
-          # Thêm phân biệt matrix (target); đổi prefix-key (vd. release-v2) nếu cache lỗi lạ
+          workspaces: |
+            src-tauri -> target
+          # Phân biệt matrix (aarch64 / x86_64 / Windows); bump prefix-key nếu cache hỏng lạ
           key: ${{ matrix.platform }}-${{ matrix.args }}
 
       - run: pnpm install --frozen-lockfile
@@ -107,11 +114,14 @@ jobs:
         with:
           script: |
             const tag = context.ref.replace("refs/tags/", "");
-            const { data: release } = await github.rest.repos.getReleaseByTagName({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag,
-            });
+            const { data: release } = await github.request(
+              "GET /repos/{owner}/{repo}/releases/tags/{tag}",
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag,
+              },
+            );
             const asset = release.assets.find((a) => a.name === "latest.json");
             if (!asset) {
               core.setFailed(
