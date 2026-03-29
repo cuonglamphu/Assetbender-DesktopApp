@@ -1,13 +1,17 @@
 {
   "name": "assetbender-mac",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "icons": "python scripts/prepare-app-icon.py && tauri icon src-tauri/app-icon.png -o src-tauri/icons && node scripts/sync-web-icons.mjs",
+    "test:updater": "node scripts/verify-updater-manifest.mjs",
+    "version:sync": "node scripts/sync-version.mjs",
+    "release": "node scripts/release.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
