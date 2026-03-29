@@ -2,8 +2,7 @@
 # Cần GitHub secrets:
 #   TAURI_SIGNING_PRIVATE_KEY — nội dung private key (hoặc base64), khớp pubkey trong tauri.conf.json
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — (tuỳ chọn) nếu key có mật khẩu
-# Tuỳ chọn — mirror release lên Cloudflare R2 (job upload-r2):
-#   Biến repo R2_UPLOAD_ENABLED=true để bật job (if không dùng secrets — tránh lỗi validator GitHub).
+# Tuỳ chọn — mirror release lên Cloudflare R2 (job upload-r2 luôn chạy sau verify; thiếu secret R2 → bỏ qua upload, job vẫn success).
 #   Secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
 #   Biến repo R2_PUBLIC_BASE_URL — URL HTTPS công khai (vd. https://updates.example.com), rewrite latest.json
 #   Biến repo R2_PREFIX (mặc định assetbender): prefix trong bucket + URL CDN
@@ -149,7 +148,6 @@ jobs:
     name: Mirror release to Cloudflare R2
     needs: verify-release-has-updater-json
     runs-on: ubuntu-latest
-    if: ${{ vars.R2_UPLOAD_ENABLED == 'true' }}
     permissions:
       contents: read
     env:
@@ -160,7 +158,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check R2 secrets
+        id: r2
+        run: |
+          if [ -n "$R2_ACCESS_KEY_ID" ] && [ -n "$R2_SECRET_ACCESS_KEY" ] && [ -n "$R2_BUCKET" ] && [ -n "$R2_ACCOUNT_ID" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::R2 secrets chưa đủ — bỏ qua mirror (cấu hình R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET)."
+          fi
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+
       - name: Download GitHub release assets
+        if: steps.r2.outputs.ok == 'true'
         run: |
           set -euo pipefail
           mkdir -p release-assets
@@ -168,7 +182,7 @@ jobs:
           gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
 
       - name: Point latest.json URLs to CDN (R2 public URL)
-        if: ${{ vars.R2_PUBLIC_BASE_URL != '' }}
+        if: steps.r2.outputs.ok == 'true' && vars.R2_PUBLIC_BASE_URL != ''
         env:
           R2_PUBLIC_BASE_URL: ${{ vars.R2_PUBLIC_BASE_URL }}
           R2_PREFIX: ${{ vars.R2_PREFIX }}
@@ -177,6 +191,7 @@ jobs:
         run: node scripts/rewrite-updater-manifest-for-r2.mjs
 
       - name: Upload to R2 (S3 API)
+        if: steps.r2.outputs.ok == 'true'
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
