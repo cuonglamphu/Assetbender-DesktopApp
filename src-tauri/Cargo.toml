@@ -1,6 +1,6 @@
 [package]
 name = "assetbender-mac"
-version = "0.0.11"
+version = "0.0.10"
 description = "AssetBender desktop client"
 authors = ["you"]
 edition = "2021"
@@ -14,6 +14,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["image-png"] }
+tauri-utils = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
@@ -34,3 +35,4 @@ zip = "2"
 gethostname = "0.5"
 log = "0.4"
 env_logger = "0.11"
+percent-encoding = "2"

@@ -2,8 +2,14 @@
 # Cần GitHub secrets:
 #   TAURI_SIGNING_PRIVATE_KEY — nội dung private key (hoặc base64), khớp pubkey trong tauri.conf.json
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD — (tuỳ chọn) nếu key có mật khẩu
+# Tuỳ chọn — mirror release lên Cloudflare R2 (job upload-r2):
+#   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (tên bucket)
+#   R2_PUBLIC_BASE_URL — URL HTTPS công khai trỏ tới bucket (vd. https://updates.example.com), để viết lại platforms.*.url trong latest.json
+# Tuỳ chọn — biến repo R2_PREFIX (mặc định assetbender): prefix trong bucket + trong URL CDN
 # Tag: git tag v0.1.0 && git push origin v0.1.0
 # Trước release lần đầu: thay pubkey trong tauri.conf.json bằng pubkey khớp secret (pnpm exec tauri signer generate).
+# Nếu commit `.tauri/updater.key.pub`, workflow sẽ chạy `pnpm run pubkey:sync` trước build để pubkey trong JSON khớp file .pub.
+# Cache: setup-node cache: pnpm (pnpm-lock.yaml) + Swatinem/rust-cache (src-tauri, key theo matrix target).
 
 name: Release
 
@@ -45,6 +51,11 @@ jobs:
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
 
+      - name: Sync updater pubkey into tauri.conf.json
+        if: hashFiles('.tauri/updater.key.pub') != ''
+        shell: bash
+        run: node scripts/sync-updater-pubkey.mjs
+
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -58,6 +69,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: release
+          workspaces: src-tauri
+          # Thêm phân biệt matrix (target); đổi prefix-key (vd. release-v2) nếu cache lỗi lạ
+          key: ${{ matrix.platform }}-${{ matrix.args }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -77,3 +95,80 @@ jobs:
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+
+  # Fail sớm nếu không có latest.json — tránh app/updater 404 im lặng.
+  verify-release-has-updater-json:
+    name: Verify release has latest.json
+    needs: publish-tauri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const tag = context.ref.replace("refs/tags/", "");
+            const { data: release } = await github.rest.repos.getReleaseByTagName({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag,
+            });
+            const asset = release.assets.find((a) => a.name === "latest.json");
+            if (!asset) {
+              core.setFailed(
+                'Thiếu asset "latest.json" trên release — URL .../releases/latest/download/latest.json sẽ 404. ' +
+                  "Cần: bundle.createUpdaterArtifacts: true trong tauri.conf.json, " +
+                  "secret TAURI_SIGNING_PRIVATE_KEY khớp pubkey, và includeUpdaterJson: true trên tauri-action.",
+              );
+            } else {
+              core.notice(`OK: latest.json (${asset.size} bytes)`);
+            }
+
+  # Mirror toàn bộ asset release + latest.json lên Cloudflare R2 (HTTPS công khai cho updater/CDN).
+  upload-r2:
+    name: Mirror release to Cloudflare R2
+    needs: verify-release-has-updater-json
+    runs-on: ubuntu-latest
+    if: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_BUCKET != '' && secrets.R2_ACCOUNT_ID != '' }}
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_EC2_METADATA_DISABLED: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download GitHub release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          cd release-assets
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --clobber
+
+      - name: Point latest.json URLs to CDN (R2 public URL)
+        if: ${{ secrets.R2_PUBLIC_BASE_URL != '' }}
+        env:
+          R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+          R2_PREFIX: ${{ vars.R2_PREFIX }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          LATEST_JSON_PATH: release-assets/latest.json
+        run: node scripts/rewrite-updater-manifest-for-r2.mjs
+
+      - name: Upload to R2 (S3 API)
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_PREFIX: ${{ vars.R2_PREFIX }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          PREFIX="${R2_PREFIX:-assetbender}"
+          TAG="${GITHUB_REF_NAME}"
+          aws s3 sync release-assets "s3://${R2_BUCKET}/${PREFIX}/${TAG}/" \
+            --endpoint-url "${ENDPOINT}" \
+            --region auto
+          aws s3 cp "release-assets/latest.json" "s3://${R2_BUCKET}/${PREFIX}/latest.json" \
+            --endpoint-url "${ENDPOINT}" \
+            --region auto \
+            --content-type application/json
+          echo "Uploaded to s3://${R2_BUCKET}/${PREFIX}/${TAG}/ and s3://${R2_BUCKET}/${PREFIX}/latest.json"

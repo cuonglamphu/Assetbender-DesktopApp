@@ -81,8 +81,9 @@ export function HomePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updateNote, setUpdateNote] = useState<string | null>(null);
-  const [installProgress, setInstallProgress] =
-    useState<InstallProgressPayload | null>(null);
+  const [installProgressMap, setInstallProgressMap] = useState<
+    Record<string, InstallProgressPayload>
+  >({});
   const [manifest, setManifest] = useState<InstallManifest>({});
 
   const [pluginQuery, setPluginQuery] = useState("");
@@ -125,15 +126,17 @@ export function HomePage() {
     })();
   }, []);
 
-  /** Gộp event tải theo frame — tránh setState mỗi chunk 8KB làm thanh % giật. */
+  /** Gộp event tải theo frame — tránh setState mỗi chunk 8KB làm thanh % giật. Mỗi (kind,id) một dòng tiến trình. */
   const installProgressRafRef = useRef<number>(0);
-  const pendingProgressRef = useRef<InstallProgressPayload | null>(null);
+  const pendingProgressMapRef = useRef<Record<string, InstallProgressPayload>>({});
 
   useEffect(() => {
     const flush = () => {
       installProgressRafRef.current = 0;
-      const next = pendingProgressRef.current;
-      if (next) setInstallProgress(next);
+      const delta = pendingProgressMapRef.current;
+      pendingProgressMapRef.current = {};
+      if (Object.keys(delta).length === 0) return;
+      setInstallProgressMap((prev) => ({ ...prev, ...delta }));
     };
 
     const u = listen("install-progress", (e) => {
@@ -145,11 +148,15 @@ export function HomePage() {
       };
       if (p.kind !== "plugin" && p.kind !== "pack") return;
       if (p.id == null) return;
-      pendingProgressRef.current = {
-        kind: p.kind,
-        id: p.id,
-        downloaded: p.downloaded ?? 0,
-        total: p.total ?? null,
+      const key = `${p.kind}:${p.id}`;
+      pendingProgressMapRef.current = {
+        ...pendingProgressMapRef.current,
+        [key]: {
+          kind: p.kind,
+          id: p.id,
+          downloaded: p.downloaded ?? 0,
+          total: p.total ?? null,
+        },
       };
       if (installProgressRafRef.current === 0) {
         installProgressRafRef.current = requestAnimationFrame(flush);
@@ -164,17 +171,20 @@ export function HomePage() {
     };
   }, []);
 
-  function clearInstallProgress() {
-    setInstallProgress(null);
-  }
-
-  function onInstallActivityEnd() {
-    clearInstallProgress();
+  function onInstallActivityEnd(kind: "plugin" | "pack", id: number) {
+    const key = `${kind}:${id}`;
+    delete pendingProgressMapRef.current[key];
+    setInstallProgressMap((prev) => {
+      if (!(key in prev)) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
     void refreshManifest();
   }
 
-  const cancelInstallDownload = useCallback(() => {
-    void invoke("cancel_install_download");
+  const cancelInstallDownload = useCallback((kind: "plugin" | "pack", id: number) => {
+    void invoke("cancel_install_download", { kind, id });
   }, []);
 
   const filteredPlugins = useMemo(() => {
@@ -248,12 +258,11 @@ export function HomePage() {
                       plugin={p}
                       manifest={manifest}
                       progressForCard={
-                        installProgress?.kind === "plugin" &&
-                          installProgress.id === p.id
-                          ? installProgress
-                          : null
+                        installProgressMap[`plugin:${p.id}`] ?? null
                       }
-                      onCancelInstall={cancelInstallDownload}
+                      onCancelInstall={() =>
+                        cancelInstallDownload("plugin", p.id)
+                      }
                       onInstallFinished={onInstallActivityEnd}
                     />
                   ))}
@@ -275,12 +284,11 @@ export function HomePage() {
                       pack={p}
                       manifest={manifest}
                       progressForCard={
-                        installProgress?.kind === "pack" &&
-                          installProgress.id === p.id
-                          ? installProgress
-                          : null
+                        installProgressMap[`pack:${p.id}`] ?? null
                       }
-                      onCancelInstall={cancelInstallDownload}
+                      onCancelInstall={() =>
+                        cancelInstallDownload("pack", p.id)
+                      }
                       onInstallFinished={onInstallActivityEnd}
                     />
                   ))}
@@ -305,12 +313,11 @@ export function HomePage() {
                       pack={p}
                       manifest={manifest}
                       progressForCard={
-                        installProgress?.kind === "pack" &&
-                          installProgress.id === p.id
-                          ? installProgress
-                          : null
+                        installProgressMap[`pack:${p.id}`] ?? null
                       }
-                      onCancelInstall={cancelInstallDownload}
+                      onCancelInstall={() =>
+                        cancelInstallDownload("pack", p.id)
+                      }
                       onInstallFinished={onInstallActivityEnd}
                     />
                   ))}
@@ -344,7 +351,7 @@ function PluginRow({
   manifest: InstallManifest;
   progressForCard: InstallProgressPayload | null;
   onCancelInstall: () => void;
-  onInstallFinished: () => void;
+  onInstallFinished: (kind: "plugin" | "pack", id: number) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [uninstallBusy, setUninstallBusy] = useState(false);
@@ -377,7 +384,7 @@ function PluginRow({
       setInstallErr(String(e));
     } finally {
       setBusy(false);
-      onInstallFinished();
+      onInstallFinished("plugin", plugin.id);
     }
   }
 
@@ -386,7 +393,7 @@ function PluginRow({
     setInstallErr(null);
     try {
       await invoke("uninstall_plugin", { id: plugin.id });
-      onInstallFinished();
+      onInstallFinished("plugin", plugin.id);
     } catch (e) {
       setInstallErr(String(e));
     } finally {
@@ -498,7 +505,7 @@ function PackTile({
   manifest: InstallManifest;
   progressForCard: InstallProgressPayload | null;
   onCancelInstall: () => void;
-  onInstallFinished: () => void;
+  onInstallFinished: (kind: "plugin" | "pack", id: number) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [uninstallBusy, setUninstallBusy] = useState(false);
@@ -532,7 +539,7 @@ function PackTile({
       setInstallErr(String(e));
     } finally {
       setBusy(false);
-      onInstallFinished();
+      onInstallFinished("pack", pack.id);
     }
   }
 
@@ -541,7 +548,7 @@ function PackTile({
     setInstallErr(null);
     try {
       await invoke("uninstall_pack", { id: pack.id });
-      onInstallFinished();
+      onInstallFinished("pack", pack.id);
     } catch (e) {
       setInstallErr(String(e));
     } finally {

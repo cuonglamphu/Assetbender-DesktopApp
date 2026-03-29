@@ -2,6 +2,7 @@ mod auth;
 mod install;
 mod paths;
 mod pkce;
+mod updater_probe;
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -10,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::json;
+use tauri::image::Image;
 use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
@@ -97,33 +99,55 @@ pub struct OauthState {
     pub code_verifier: Arc<Mutex<Option<String>>>,
 }
 
-/// Một phiên download cài đặt — hủy qua `cancel_install_download` (không hỗ trợ pause/resume HTTP Range).
+/// Nhiều phiên download cài đặt song song — mỗi (kind, id) một cờ hủy.
+/// Hủy qua `cancel_install_download` (không hỗ trợ pause/resume HTTP Range).
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+enum InstallSessionKind {
+    Plugin,
+    Pack,
+}
+
+#[derive(Clone, Copy, Hash, Eq, PartialEq)]
+struct InstallSessionKey(InstallSessionKind, i64);
+
 #[derive(Clone)]
 pub struct InstallDownloadCancel {
-    active: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    sessions: Arc<Mutex<HashMap<InstallSessionKey, Arc<AtomicBool>>>>,
 }
 
 impl InstallDownloadCancel {
     pub fn new() -> Self {
         Self {
-            active: Arc::new(Mutex::new(None)),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    fn start_session(&self) -> Arc<AtomicBool> {
+    fn start_session(&self, key: InstallSessionKey) -> Arc<AtomicBool> {
         let f = Arc::new(AtomicBool::new(false));
-        *self.active.lock().unwrap() = Some(f.clone());
+        self.sessions.lock().unwrap().insert(key, f.clone());
         f
     }
 
-    fn end_session(&self) {
-        *self.active.lock().unwrap() = None;
+    fn end_session(&self, key: InstallSessionKey) {
+        self.sessions.lock().unwrap().remove(&key);
     }
 
-    pub fn cancel_current(&self) {
-        if let Some(f) = self.active.lock().unwrap().as_ref() {
+    pub fn cancel_install(&self, kind: &str, id: i64) {
+        let Some(sk) = parse_install_session_kind(kind.trim()) else {
+            return;
+        };
+        let key = InstallSessionKey(sk, id);
+        if let Some(f) = self.sessions.lock().unwrap().get(&key) {
             f.store(true, Ordering::SeqCst);
         }
+    }
+}
+
+fn parse_install_session_kind(s: &str) -> Option<InstallSessionKind> {
+    match s {
+        "plugin" => Some(InstallSessionKind::Plugin),
+        "pack" => Some(InstallSessionKind::Pack),
+        _ => None,
     }
 }
 
@@ -137,6 +161,28 @@ pub struct AppConfigPayload {
     pub refresh_token_path: String,
     pub logout_path: String,
     pub token_path: String,
+}
+
+/// Local paths aligned with the MotionBender CEP panel (`userData` + same folder names).
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct DataPathsPayload {
+    pub app_data_root: String,
+    pub assets_flow_dir: String,
+    pub pack_install_dir: String,
+    pub cep_extensions_dir: String,
+    pub cep_extension_id: String,
+}
+
+#[tauri::command]
+fn get_data_paths() -> DataPathsPayload {
+    DataPathsPayload {
+        app_data_root: paths::app_data_root().to_string_lossy().into_owned(),
+        assets_flow_dir: paths::assets_flow_dir().to_string_lossy().into_owned(),
+        pack_install_dir: paths::pack_install_dir().to_string_lossy().into_owned(),
+        cep_extensions_dir: paths::cep_extensions_dir().to_string_lossy().into_owned(),
+        cep_extension_id: paths::CEP_EXTENSION_ID.to_string(),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -408,7 +454,8 @@ async fn install_plugin_from_url(
     id: i64,
     version: String,
 ) -> Result<InstallResult, String> {
-    let cancel = state.start_session();
+    let key = InstallSessionKey(InstallSessionKind::Plugin, id);
+    let cancel = state.start_session(key);
     let app = app.clone();
     let ctrl = (*state).clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -416,7 +463,7 @@ async fn install_plugin_from_url(
     })
     .await
     .map_err(|e| format!("install plugin task: {e}"))?;
-    ctrl.end_session();
+    ctrl.end_session(key);
     result
 }
 
@@ -480,7 +527,8 @@ async fn install_pack_from_url(
     id: i64,
     version: String,
 ) -> Result<InstallResult, String> {
-    let cancel = state.start_session();
+    let key = InstallSessionKey(InstallSessionKind::Pack, id);
+    let cancel = state.start_session(key);
     let app = app.clone();
     let ctrl = (*state).clone();
     let result = tokio::task::spawn_blocking(move || {
@@ -488,7 +536,7 @@ async fn install_pack_from_url(
     })
     .await
     .map_err(|e| format!("install pack task: {e}"))?;
-    ctrl.end_session();
+    ctrl.end_session(key);
     result
 }
 
@@ -524,8 +572,8 @@ fn install_pack_from_url_inner(
 }
 
 #[tauri::command]
-fn cancel_install_download(state: tauri::State<'_, InstallDownloadCancel>) {
-    state.cancel_current();
+fn cancel_install_download(state: tauri::State<'_, InstallDownloadCancel>, kind: String, id: i64) {
+    state.cancel_install(&kind, id);
 }
 
 #[tauri::command]
@@ -610,10 +658,11 @@ async fn check_app_update(app: tauri::AppHandle) -> Result<Option<String>, Strin
 }
 
 fn init_logging() {
-    let _ = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .try_init();
+    // `tauri_plugin_updater=debug` → log dòng "checking for updates {url}" từ plugin.
+    let default = "info,tauri_plugin_updater=debug,reqwest=warn";
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default))
+        .format_timestamp_secs()
+        .try_init();
 }
 
 /// Cold start: URL có thể đến từ `get_current()` hoặc `std::env::args` (Windows thường truyền `nameapp://...` trong argv).
@@ -701,6 +750,23 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             {
+                let probe_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    updater_probe::log_updater_endpoint_probe(&probe_handle).await;
+                });
+
+                // `bundle.icon` chỉ áp cho bộ cài; `tauri dev` / exe debug vẫn có thể hiện icon mặc định nếu không set ở đây.
+                match Image::from_bytes(include_bytes!("../icons/32x32.png")) {
+                    Ok(icon) => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            if let Err(e) = w.set_icon(icon) {
+                                log::warn!("[icon] set window icon: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => log::warn!("[icon] load 32x32.png: {}", e),
+                }
+
                 use tauri_plugin_deep_link::DeepLinkExt;
                 // Windows/Linux: associate `nameapp://` with this executable (required for `start nameapp://...` and browser redirects).
                 // macOS uses Info.plist from the bundle; register() is unsupported there.
@@ -752,6 +818,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_app_config,
+            get_data_paths,
             session_get,
             session_save_tokens,
             session_refresh,

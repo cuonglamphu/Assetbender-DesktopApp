@@ -1,4 +1,5 @@
 # CI: frontend (Vite/TS) + Rust (clippy/test). Repo root = thư mục chứa package.json (assetbender-mac).
+# Cache: setup-node cache: pnpm (pnpm-lock.yaml); job rust dùng Swatinem/rust-cache (src-tauri).
 # Monorepo: đặt workflows ở root repo và thêm defaults.run.working-directory: assetbender-mac cho mỗi job.
 
 name: CI
@@ -34,7 +35,29 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm test
       - run: pnpm run build
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm run build
+      - run: pnpm exec playwright test
 
   rust:
     name: Rust (clippy + test)

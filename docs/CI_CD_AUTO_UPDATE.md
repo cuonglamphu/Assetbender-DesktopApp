@@ -18,6 +18,50 @@ Workflow release dùng [`tauri-apps/tauri-action@v0`](https://github.com/tauri-a
 1. Repo trên GitHub (quyền **Actions** và **Contents: write** cho `GITHUB_TOKEN` khi release).
 2. **Cặp khóa ký** Tauri (minisign): public key nằm trong `tauri.conf.json`, private key chỉ lưu trong **GitHub Secrets** (không commit).
 
+### Bảng tra cứu: key lấy đâu, đặt đâu
+
+Trên GitHub repo: **Settings → Secrets and variables → Actions**.
+
+#### Secrets (bắt buộc cho release có ký)
+
+| Secret | Lấy giá trị ở đâu | Ghi chú |
+|--------|-------------------|---------|
+| `TAURI_SIGNING_PRIVATE_KEY` | File **private** local `.tauri/updater.key` (toàn bộ nội dung, hoặc đúng định dạng base64 mà Tauri dùng). Tạo bằng `pnpm exec tauri signer generate -w .tauri/updater.key`. | **Repository secrets**. Khớp với `plugins.updater.pubkey` trong `tauri.conf.json` (đồng bộ bằng `pnpm run pubkey:sync`). Không commit file `.key`. |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Mật khẩu bạn gõ khi tạo key **có** password. | Chỉ tạo secret nếu key **có** mật khẩu; nếu generate **không** password thì **không** cần secret này (hoặc để trống). |
+
+#### Secrets (tuỳ chọn — job **upload-r2** lên Cloudflare R2)
+
+Tạo bucket và API token trong [Cloudflare Dashboard](https://dash.cloudflare.com/) → **R2** → bucket của bạn → **Manage R2 API Tokens** (hoặc **Overview** để xem **Account ID**).
+
+| Secret | Lấy giá trị ở đâu | Ghi chú |
+|--------|-------------------|---------|
+| `R2_ACCOUNT_ID` | Cloudflare: trang **Overview** tài khoản (hoặc URL R2), cột **Account ID**. | Dùng trong endpoint S3: `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`. |
+| `R2_ACCESS_KEY_ID` | Khi tạo **R2 API token** (quyền đọc/ghi object trên bucket đích). | Giống “Access Key ID” của token. |
+| `R2_SECRET_ACCESS_KEY` | Cùng lúc tạo API token (chỉ hiện một lần — lưu ngay). | Giống “Secret Access Key”. |
+| `R2_BUCKET` | Tên bucket bạn tạo trong R2 (ví dụ `assetbender-updates`). | Chỉ tên bucket, không có `s3://`. |
+| `R2_PUBLIC_BASE_URL` | **Không** phải key trong Cloudflare — đây là **URL HTTPS công khai** bạn cấu hình trỏ vào bucket (Custom Domain trên R2, hoặc URL public `*.r2.dev` nếu bật). Ví dụ `https://updates.yourdomain.com` (không `/` cuối). | Dùng để script viết lại `platforms.*.url` trong `latest.json`. Phải khớp cách file được phục vụ qua HTTPS (path `/<prefix>/<tag>/filename`). |
+
+Nếu **thiếu** bất kỳ secret R2 nào trong nhóm `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET`, job **upload-r2** sẽ **không chạy** (điều kiện `if` trong workflow).
+
+#### Variables (tuỳ chọn)
+
+Cùng trang **Secrets and variables → Actions** → tab **Variables**.
+
+| Variable | Giá trị | Ghi chú |
+|----------|---------|---------|
+| `R2_PREFIX` | Chuỗi prefix, mặc định trong workflow là `assetbender` nếu không đặt. | Dùng cho path trên bucket và trong URL CDN: `…/assetbender/v1.0.0/…`. |
+
+#### Trong code (không phải GitHub Secret)
+
+| Nội dung | File | Ghi chú |
+|----------|------|---------|
+| Public key minisign (base64 của file `.pub`) | `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` | `pnpm run pubkey:sync` từ `.tauri/updater.key.pub`. |
+| URL manifest updater (GitHub hoặc CDN) | `src-tauri/tauri.conf.json` → `plugins.updater.endpoints` | Ví dụ GitHub `…/releases/latest/download/latest.json` hoặc CDN `https://…/assetbender/latest.json` nếu dùng R2 + rewrite. |
+
+#### Token mặc định của GitHub Actions
+
+`GITHUB_TOKEN` do GitHub inject sẵn cho workflow — **không** cần tạo trong Secrets (trừ khi bạn override bằng PAT cho use-case đặc biệt).
+
 ## Bước 1: Tạo cặp khóa ký (một lần)
 
 Trong thư mục dự án (đã cài `@tauri-apps/cli`):
@@ -29,9 +73,17 @@ pnpm exec tauri signer generate -w .tauri/updater.key
 - File **private** `.tauri/updater.key` đã được liệt kê trong `.gitignore` — **không** đưa lên Git.
 - CLI tạo thêm file **public** (ví dụ `.tauri/updater.key.pub`).
 
-**Public key dán ở đâu:** trong `src-tauri/tauri.conf.json`, đường dẫn JSON là **`plugins` → `updater` → `pubkey`** (chuỗi minisign **một dòng**, thường bắt đầu bằng `RW`).
+**Public key dán ở đâu:** trong `src-tauri/tauri.conf.json`, đường dẫn JSON là **`plugins` → `updater` → `pubkey`**. Tauri 2 build/updater **kỳ vọng giá trị là base64** của toàn bộ file `.pub` (UTF-8, hai dòng minisign), **không** phải chỉ dòng bắt đầu bằng `RW` — nếu chỉ dán dòng `RW`, build có thể báo lỗi kiểu `failed to decode base64 pubkey`.
 
-**Lấy giá trị từ đâu:** mở file `.pub`, copy **dòng thứ hai** (toàn bộ dòng — đó là public key). Dòng đầu là comment minisign, **không** dán vào `pubkey`.
+**Lấy giá trị đúng:** dùng `pnpm run pubkey:sync` (khuyến nghị), hoặc base64 hóa toàn bộ nội dung file `.pub` (cả comment + dòng public key).
+
+**Tự động:** sau khi generate hoặc đổi file `.tauri/updater.key.pub`, chạy:
+
+```bash
+pnpm run pubkey:sync
+```
+
+Script `scripts/sync-updater-pubkey.mjs` đọc `.pub` (hai dòng minisign hoặc một dòng base64 của file đó) và ghi `plugins.updater.pubkey` dưới dạng **base64** chuẩn Tauri.
 
 Ví dụ cấu trúc (repo của bạn có thể khác `OWNER/REPO` hoặc đã sửa URL):
 
@@ -42,22 +94,12 @@ Ví dụ cấu trúc (repo của bạn có thể khác `OWNER/REPO` hoặc đã 
     "endpoints": [
       "https://github.com/OWNER/REPO/releases/latest/download/latest.json"
     ],
-    "pubkey": "RWxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    "pubkey": "<một chuỗi base64 dài — toàn bộ file .pub dạng UTF-8>"
   }
 }
 ```
 
-Trong repo hiện tại, khóa nằm tại:
-
-```37:43:src-tauri/tauri.conf.json
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/cuonglamphu/Assetbender-DesktopApp/releases/latest/download/latest.json"
-      ],
-      "pubkey": "RWS3gEgLSyeV6pLMQxA88qi7UJtuwcD3Atserdkh65a16xIq+drTRxrkW"
-    }
-```
+Trong repo hiện tại, `pubkey` nằm trong `src-tauri/tauri.conf.json` dưới `plugins.updater` (đồng bộ bằng `pnpm run pubkey:sync` khi cần).
 
 **Lưu ý:** `pubkey` phải **cùng cặp** với private key dùng khi ký (`TAURI_SIGNING_PRIVATE_KEY` / file `.tauri/updater.key`). Đổi một trong hai thì phải đổi cả hai cho khớp.
 
@@ -83,6 +125,22 @@ Trước mỗi release, cập nhật version **cùng một giá trị** ở:
 
 Tag Git nên phản ánh version (ví dụ app `0.2.0` → tag `v0.2.0`).
 
+Một lệnh để ghi cùng version vào cả ba file:
+
+```bash
+pnpm run version:sync -- 0.2.0
+```
+
+Commit, push nhánh hiện tại, tạo tag `v*` và push tag (kích hoạt workflow **Release**):
+
+```bash
+pnpm run release -- 0.2.0
+```
+
+Luồng này gọi `version:sync` rồi **`pubkey:sync`** (đồng bộ `plugins.updater.pubkey` từ `.tauri/updater.key.pub` vào `tauri.conf.json`) trước khi commit. Trên **GitHub Actions**, workflow **Release** chạy cùng bước `pubkey:sync` trước build **nếu** repo có file `.tauri/updater.key.pub` (nếu không có, dùng `pubkey` đã commit trong JSON).
+
+Tuỳ chọn: `--dry-run` (chỉ in lệnh), `--skip-push` (commit + tag local, tự push sau), `--all` (`git add -A` thay vì chỉ 3 file version).
+
 ## Bước 3: Chạy CI
 
 Push lên nhánh `main` / `master` / `develop` hoặc mở PR — workflow **CI** chạy tự động. Monorepo: đặt file workflow ở **root repo** và thêm `defaults.run.working-directory: assetbender-mac` (hoặc tương đương) nếu `package.json` không nằm ở root.
@@ -103,14 +161,90 @@ Push lên nhánh `main` / `master` / `develop` hoặc mở PR — workflow **CI*
 
 Client đã cài app cũ sẽ lấy `latest.json` từ URL trong `tauri.conf.json` (sau khi CI đã thay đúng `OWNER/REPO`).
 
+### Tuỳ chọn: repo code private + manifest công khai (Cloudflare R2)
+
+Phù hợp khi **repo GitHub private** (CI vẫn build và ký bằng secret) nhưng updater cần URL **HTTPS công khai** ổn định, không phụ thuộc `github.com/.../releases/latest/download/latest.json` (draft, quyền asset, hoặc muốn CDN).
+
+Workflow **Release** (`.github/workflows/release.yml`) có job **`upload-r2`** (chạy sau khi verify có `latest.json`): tải toàn bộ asset của release GitHub bằng `gh release download`, rồi đẩy lên R2 bằng **AWS CLI** (S3-compatible). Job **chỉ chạy** nếu đủ secrets:
+
+| Secret | Ý nghĩa |
+|--------|---------|
+| `R2_ACCOUNT_ID` | ID tài khoản Cloudflare (dùng trong endpoint `https://<ID>.r2.cloudflarestorage.com`) |
+| `R2_ACCESS_KEY_ID` | API token R2 (access key) |
+| `R2_SECRET_ACCESS_KEY` | API token R2 (secret) |
+| `R2_BUCKET` | Tên bucket **chỉ** tên bucket (không có `s3://`) |
+| `R2_PUBLIC_BASE_URL` | (Khuyến nghị) Origin HTTPS công khai trỏ vào bucket, **không** có `/` cuối — ví dụ `https://updates.example.com`. Dùng để **viết lại** nội dung `latest.json`: mỗi `platforms.*.url` đổi từ link GitHub sang `…/<R2_PREFIX>/<tag>/<tên-file-giống-release>`. Trường `signature` giữ nguyên (cùng file binary đã mirror). |
+
+Tuỳ chọn (biến repo **Variables**): `R2_PREFIX` — prefix trong bucket và trong URL CDN (mặc định `assetbender`).
+
+**Đường dẫn trên R2 sau mỗi tag `v1.2.3`:**
+
+- `s3://<bucket>/<R2_PREFIX>/v1.2.3/` — toàn bộ file đã tải từ release (installer, `.sig`, …).
+- `s3://<bucket>/<R2_PREFIX>/latest.json` — manifest (sau bước rewrite nếu có `R2_PUBLIC_BASE_URL`), ghi đè mỗi release.
+
+**Nội dung `latest.json`:** job chạy script `scripts/rewrite-updater-manifest-for-r2.mjs` khi secret `R2_PUBLIC_BASE_URL` được đặt. Script chỉ thay **URL tải** cho từng nền tải; `version`, `notes`, `pub_date`, `signature` giữ như bản Tauri tạo. Bạn cần cấu hình DNS / R2 public access sao cho URL dạng  
+`https://<R2_PUBLIC_BASE_URL>/<R2_PREFIX>/<tag>/<filename>`  
+trả đúng object đã upload (trùng tên file với asset trên GitHub).
+
+Trong `tauri.conf.json`, `plugins.updater.endpoints` nên trỏ tới manifest công khai, ví dụ  
+`https://updates.example.com/assetbender/latest.json`  
+(khớp `R2_PUBLIC_BASE_URL` + `R2_PREFIX` + `/latest.json`).
+
+Giữ **cùng cặp khóa ký** (minisign) giữa CI và `pubkey` trong app. R2 không thay GitHub Actions — vẫn build trên CI; R2 là **bản phục vụ công khai** tuỳ chọn.
+
 ## Gỡ lỗi thường gặp
 
 | Hiện tượng | Gợi ý |
 |------------|--------|
 | Release fail ở bước ký | Kiểm tra secret `TAURI_SIGNING_PRIVATE_KEY`, khớp pubkey trong `tauri.conf.json`. |
+| `incorrect updater private key password` / `Wrong password for that key` | Khóa minisign **có mật khẩu** khi tạo nhưng secret **`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`** trên GitHub sai hoặc thiếu — sửa đúng mật khẩu, hoặc tạo lại key **không mật khẩu** (`tauri signer generate` không `-p`) và cập nhật cả private secret + `pubkey` trong `tauri.conf.json`. Nếu key **không** có mật khẩu: xóa secret `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` hoặc để giá trị rỗng (đừng đặt mật khẩu giả). |
 | App không thấy bản mới | URL `endpoints` phải trỏ đúng repo có release + `latest.json`; version trong app phải **thấp hơn** version release. |
 | `latest.json` sai asset | Xem [tauri-action](https://github.com/tauri-apps/tauri-action) và `updaterJsonPreferNsis` (Windows). |
 | Monorepo | Chỉnh `projectPath`, đường dẫn `pnpm-lock.yaml`, và bước replace `tauri.conf.json` cho đúng thư mục `src-tauri`. |
+
+## Test auto-update
+
+### Đồng bộ version (tránh lệch tag / installer / manifest)
+
+Trước mỗi release, cùng một số version ở `package.json`, `src-tauri/tauri.conf.json` (`version`), `src-tauri/Cargo.toml` (`version`), và tag Git (ví dụ app `0.2.0` → `v0.2.0`). Nếu tag là `v0.0.1` mà file cài đặt ghi `0.1.0`, updater và người dùng sẽ khó đối chiếu — giữ một nguồn version.
+
+Trong `src-tauri/tauri.conf.json`, bật artifact updater khi build release:
+
+```json
+"bundle": {
+  "createUpdaterArtifacts": true
+}
+```
+
+(không bật thì có thể thiếu `.sig` / bundle dùng cho updater.)
+
+### Test thủ công trong app
+
+1. Cài bản **cũ** (version thấp hơn), ví dụ `0.0.1`.
+2. Trên GitHub đã có release **mới hơn** (ví dụ `0.0.2`) với `latest.json` công khai (**không** draft — `releases/latest/download/latest.json` sẽ 404 nếu chỉ có draft).
+3. Mở app → nút **Check updates** (gọi `check_app_update`) hoặc tích hợp [plugin updater](https://v2.tauri.app/plugin/updater/) để tải và cài.
+
+Updater chỉ báo có bản mới khi **semver** trên manifest **lớn hơn** version app đang chạy.
+
+### Kiểm tra tự động `latest.json`
+
+Trong thư mục `assetbender-mac`:
+
+```bash
+pnpm test:updater
+pnpm test:updater -- --probe
+```
+
+- Không cờ: tải manifest, kiểm tra `version`, `platforms.*.url`, `platforms.*.signature`.
+- `--probe`: thêm kiểm tra HTTP (HEAD/G fallback) từng URL asset.
+
+URL mặc định lấy từ `plugins.updater.endpoints[0]` trong `tauri.conf.json`, hoặc:
+
+`UPDATER_MANIFEST_URL=https://github.com/OWNER/REPO/releases/latest/download/latest.json pnpm test:updater -- --probe`
+
+Workflow **Verify updater manifest** (`.github/workflows/verify-updater.yml`) chạy `node scripts/verify-updater-manifest.mjs --probe` theo lịch và khi sửa file liên quan.
+
+Nếu `pnpm test:updater` báo **404**: thường là release còn **Draft**, **chưa có asset tên đúng `latest.json`** (trên tab Release phải thấy file đó cạnh `.exe`/`.dmg`), hoặc repo **private** (cần `GITHUB_TOKEN`). Nếu đã Publish mà vẫn không có `latest.json` trong danh sách assets, build CI **không** sinh/up upload updater — kiểm tra `bundle.createUpdaterArtifacts: true`, secret `TAURI_SIGNING_PRIVATE_KEY`, và job **Verify release has latest.json** trong workflow Release (sẽ fail nếu thiếu file).
 
 ## Tài liệu tham khảo
 

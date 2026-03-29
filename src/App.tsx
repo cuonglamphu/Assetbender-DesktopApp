@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AppUpdateDialog } from "./components/AppUpdateDialog";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
@@ -24,10 +25,13 @@ function Shell() {
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <AppUpdateDialog />
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
 
