@@ -114,14 +114,25 @@ jobs:
         with:
           script: |
             const tag = context.ref.replace("refs/tags/", "");
-            const { data: release } = await github.request(
-              "GET /repos/{owner}/{repo}/releases/tags/{tag}",
-              {
+            // GET .../releases/tags/{tag} trả 404 với release **draft** — phải list releases (có draft).
+            let release = null;
+            for (let page = 1; page <= 10; page++) {
+              const { data } = await github.rest.repos.listReleases({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                tag,
-              },
-            );
+                per_page: 100,
+                page,
+              });
+              release = data.find((r) => r.tag_name === tag);
+              if (release) break;
+              if (data.length < 100) break;
+            }
+            if (!release) {
+              core.setFailed(
+                `Không tìm thấy release cho tag ${tag} (kể cả draft). Đợi job publish-tauri tạo release xong.`,
+              );
+              return;
+            }
             const asset = release.assets.find((a) => a.name === "latest.json");
             if (!asset) {
               core.setFailed(
