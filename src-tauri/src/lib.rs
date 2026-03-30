@@ -273,13 +273,22 @@ async fn session_logout(app: AppHandle) -> Result<(), String> {
             return Ok(());
         }
     };
+    if payload.refresh_token.trim().is_empty() {
+        log::warn!(
+            "[session_logout] token file has empty refresh_token — clearing local session only"
+        );
+        auth::delete_token_file();
+        auth::clear_oauth_state();
+        let _ = app.emit("session-ended", ());
+        return Ok(());
+    }
     let base = default_base_url();
     let device_name = gethostname::gethostname().to_string_lossy().to_string();
     let client = reqwest::Client::builder()
         .use_rustls_tls()
         .build()
         .map_err(|e| e.to_string())?;
-    let _ = client
+    match client
         .post(format!("{base}/api/oauth2/logout"))
         .header("Authorization", format!("Bearer {}", payload.access_token))
         .header("Content-Type", "application/json")
@@ -289,7 +298,26 @@ async fn session_logout(app: AppHandle) -> Result<(), String> {
             "deviceName": device_name,
         }))
         .send()
-        .await;
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {}
+        Ok(resp) => {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            let snippet: String = body.chars().take(200).collect();
+            log::warn!(
+                "[session_logout] API returned {} — device may remain listed: {}",
+                status,
+                snippet
+            );
+            if snippet.contains("Missing require parameter") {
+                log::warn!(
+                    "[session_logout] Deploy Assetsflow-Backend oauth2 logout fix (allow empty deviceIp), or device rows are not removed server-side."
+                );
+            }
+        }
+        Err(e) => log::warn!("[session_logout] request failed: {}", e),
+    }
     auth::delete_token_file();
     auth::clear_oauth_state();
     let _ = app.emit("session-ended", ());

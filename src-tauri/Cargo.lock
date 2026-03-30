@@ -119,7 +119,7 @@ dependencies = [
 
 [[package]]
 name = "assetbender-mac"
-version = "0.0.1"
+version = "0.0.26"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
