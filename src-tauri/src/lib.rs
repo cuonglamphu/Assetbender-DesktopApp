@@ -8,6 +8,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::json;
@@ -242,6 +243,7 @@ async fn session_refresh(app: AppHandle) -> Result<auth::TokenFilePayload, Strin
     let base = default_base_url();
     let client = reqwest::Client::builder()
         .use_rustls_tls()
+        .timeout(Duration::from_secs(25))
         .build()
         .map_err(|e| e.to_string())?;
     let res = client

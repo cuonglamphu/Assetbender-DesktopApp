@@ -7,7 +7,7 @@ Tài liệu này mô tả cách pipeline **build**, **ký bản phát hành**, v
 | Thành phần | Vai trò |
 |------------|---------|
 | `.github/workflows/ci.yml` | Mỗi push/PR: build frontend (`pnpm build`), `cargo clippy`, `cargo test`. |
-| `.github/workflows/release.yml` | Khi push **tag** `v*`: build **macOS (arm64 + x64)**, **Linux**, **Windows**, tạo **GitHub Release**, upload installer + **`latest.json`** cho updater. |
+| `.github/workflows/release.yml` | Khi push **tag** `v*`: build **macOS (arm64 + x64)** + **Windows**, tạo **GitHub Release**, upload `.dmg` / `.app.tar.gz` (và artifact updater `.sig`, `latest.json`). Trên macOS có thể inject **.p12** + credential Apple để **Developer ID** + **notarization** ([Tauri macOS signing](https://v2.tauri.app/distribute/sign/macos)). |
 | `src-tauri/tauri.conf.json` → `plugins.updater` | URL manifest cập nhật + **public key** minisign (khớp private key trên CI). |
 | Rust `check_app_update` + `tauri-plugin-updater` | App gọi API updater để so sánh version và tải bản đã ký. |
 
@@ -28,6 +28,26 @@ Trên GitHub repo: **Settings → Secrets and variables → Actions**.
 |--------|-------------------|---------|
 | `TAURI_SIGNING_PRIVATE_KEY` | File **private** local `.tauri/updater.key` (toàn bộ nội dung, hoặc đúng định dạng base64 mà Tauri dùng). Tạo bằng `pnpm exec tauri signer generate -w .tauri/updater.key`. | **Repository secrets**. Khớp với `plugins.updater.pubkey` trong `tauri.conf.json` (đồng bộ bằng `pnpm run pubkey:sync`). Không commit file `.key`. |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Mật khẩu bạn gõ khi tạo key **có** password. | Chỉ tạo secret nếu key **có** mật khẩu; nếu generate **không** password thì **không** cần secret này (hoặc để trống). |
+
+#### Secrets (tuỳ chọn — macOS production: ký + notarize trên GitHub Actions)
+
+Luồng chuẩn: **build trên `macos-latest`**, decode **`.p12`** (base64) vào keychain tạm, set **`APPLE_SIGNING_IDENTITY`** (hoặc để CI lấy identity khớp `Developer ID Application`), rồi **`tauri build`** nhận biến môi trường giống [tài liệu Tauri](https://v2.tauri.app/distribute/sign/macos). **Notarization** bắt buộc nếu phân phối ngoài App Store với chứng chỉ **Developer ID**.
+
+| Secret | Ghi chú |
+|--------|---------|
+| `APPLE_CERTIFICATE` | Nội dung file `.p12` đã **base64** (trên máy Mac: `openssl base64 -A -in cert.p12 -out cert.txt`). |
+| `APPLE_CERTIFICATE_PASSWORD` | Mật khẩu lúc export `.p12`. |
+| `KEYCHAIN_PASSWORD` | Mật khẩu keychain tạm trên runner (tự đặt, ví dụ chuỗi ngẫu nhiên). |
+| `APPLE_SIGNING_IDENTITY` | (Tuỳ chọn) Chuỗi đầy đủ từ `security find-identity -v -p codesigning`, ví dụ `Developer ID Application: Your Name (TEAMID)`. Nếu bỏ trống, workflow lấy identity đầu tiên kiểu **Developer ID Application** (fallback **Apple Development**). |
+
+**Notarization** — cấu hình **một** trong hai (workflow truyền thẳng vào bước `tauri-apps/tauri-action`):
+
+| Cách | Secrets |
+|------|---------|
+| **A — Apple ID** | `APPLE_ID` (email), `APPLE_PASSWORD` (**app-specific password**, không phải mật khẩu iCloud thường), `APPLE_TEAM_ID`. |
+| **B — App Store Connect API** (khuyến nghị CI) | `APPLE_API_KEY` (**Key ID** trong App Store Connect), `APPLE_API_ISSUER` (Issuer ID), `APPLE_API_KEY_P8_BASE64` (file `.p8` private key, toàn bộ nội dung base64). Workflow ghi file vào `RUNNER_TEMP` và set `APPLE_API_KEY_PATH`. |
+
+Nếu **không** set `APPLE_CERTIFICATE`, bản macOS trên CI vẫn build được (thường **ad-hoc**), không phù hợp phân phối có notarization.
 
 #### Secrets (tuỳ chọn — job **upload-r2** lên Cloudflare R2)
 
@@ -155,7 +175,7 @@ Push lên nhánh `main` / `master` / `develop` hoặc mở PR — workflow **CI*
    git push origin v0.2.0
    ```
 
-3. Vào tab **Actions** trên GitHub, theo dõi workflow **Release** (matrix 4 job).
+3. Vào tab **Actions** trên GitHub, theo dõi workflow **Release** (matrix: 2× macOS + Windows).
 4. Khi xong, trong **Releases** sẽ có bản **draft** (theo `releaseDraft: true` trong workflow). Kiểm tra asset (`.msi` / `.dmg` / `.AppImage` / …) và file **`latest.json`**.
 5. Chỉnh `releaseDraft: false` trong `release.yml` nếu muốn publish release ngay không cần duyệt draft.
 
@@ -264,4 +284,5 @@ Nếu `pnpm test:updater` báo **404**: thường là release còn **Draft**, **
 
 - [Tauri v2 — Updater](https://v2.tauri.app/plugin/updater/)
 - [tauri-action](https://github.com/tauri-apps/tauri-action) (`tauri-apps/tauri-action@v0`)
-- [Code signing](https://v2.tauri.app/distribute/sign/) (tuỳ nền tảng, thêm chứng chỉ Apple/Windows nếu phân phối rộng)
+- [macOS code signing & notarization](https://v2.tauri.app/distribute/sign/macos)
+- [Code signing — tổng quan](https://v2.tauri.app/distribute/sign/)

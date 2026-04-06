@@ -49,10 +49,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const initTimeoutMs = 30_000;
     (async () => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
-        await refreshSession();
+        await Promise.race([
+          refreshSession(),
+          new Promise<never>((_, reject) => {
+            timeoutId = window.setTimeout(() => {
+              reject(new Error("auth init timeout"));
+            }, initTimeoutMs);
+          }),
+        ]);
+      } catch {
+        setUser(null);
       } finally {
+        if (timeoutId !== undefined) window.clearTimeout(timeoutId);
         if (!cancelled) setLoading(false);
       }
     })();
