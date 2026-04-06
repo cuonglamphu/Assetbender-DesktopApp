@@ -51,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     const initTimeoutMs = 30_000;
     (async () => {
-      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      let timeoutId: number | undefined;
       try {
         await Promise.race([
           refreshSession(),

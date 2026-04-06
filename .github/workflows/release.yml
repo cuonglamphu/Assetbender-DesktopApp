@@ -179,6 +179,25 @@ jobs:
           updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
 
+      - name: Verify macOS code signature and Gatekeeper
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP=$(find src-tauri/target -type d -name "AssetBender.app" 2>/dev/null | head -1)
+          if [ -z "${APP:-}" ]; then
+            echo "::error::Không tìm thấy AssetBender.app dưới src-tauri/target (sau tauri build)."
+            find src-tauri/target -type d -name "*.app" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Verifying bundle: $APP"
+          codesign -dv --verbose=4 "$APP" 2>&1
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "spctl (Gatekeeper — cần accepted / Developer ID + Notarized khi đã notarize):"
+          spctl --assess --verbose --type execute "$APP"
+          echo "stapler validate (ticket notarization trên bundle):"
+          stapler validate "$APP"
+
   # Fail sớm nếu không có latest.json — tránh app/updater 404 im lặng.
   verify-release-has-updater-json:
     name: Verify release has latest.json
