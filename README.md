@@ -24,6 +24,30 @@ The Rust layer uses [`dirs::config_dir()`](https://docs.rs/dirs/latest/dirs/fn.c
 
 Implementation: [`src-tauri/src/paths.rs`](./src-tauri/src/paths.rs). Folder and file **names** are `pub const` there and duplicated in MotionBender [`src/constants/assetbenderPaths.ts`](../MotionBender/src/constants/assetbenderPaths.ts) — update both when renaming.
 
+## Biến môi trường (`.env`)
+
+1. **Tạo file:** copy mẫu rồi chỉnh theo môi trường của bạn (file `.env` đã được [`.gitignore`](./.gitignore) — không commit).
+
+   ```bash
+   cp .env.example .env
+   ```
+
+2. **Frontend (Vite)** — các biến `VITE_*` được **nhúng lúc build** (`pnpm dev` / `pnpm build`). Mặc định trong code: [`src/config/env.ts`](./src/config/env.ts) (trùng production nếu bạn không set).
+
+   | Biến | Ý nghĩa |
+   |------|---------|
+   | `VITE_API_URL` | Base URL API backend (REST). |
+   | `VITE_FRONTEND_URL` | Origin web/marketing (link trong app, `update-policy.json`, v.v.). |
+   | `VITE_SOCKET_URL` | URL Socket.IO (thường `wss://…`). |
+   | `VITE_PUBLIC_IMAGE_BUCKET_URL` | (Tuỳ chọn) CDN ảnh — xem [`src/config/assetUrls.ts`](./src/config/assetUrls.ts). |
+   | `VITE_UPDATE_POLICY_URL` | (Tuỳ chọn) URL đầy đủ tới `update-policy.json`; mặc định là `{VITE_FRONTEND_URL}/updater/update-policy.json`. |
+
+3. **Rust / Tauri** — (tuỳ chọn) đặt khi cần URL khác mặc định trong native layer: `ASSETBENDER_API_URL`, `ASSETBENDER_FRONTEND_URL`, `ASSETBENDER_SOCKET_URL` (đọc trong [`src-tauri/src/lib.rs`](./src-tauri/src/lib.rs)). Override thư mục CEP: `ASSETBENDER_CEP_DIR` (xem mục Data paths phía trên).
+
+4. **Ký bản build updater (local)** — khi build release có artifact updater: `TAURI_SIGNING_PRIVATE_KEY` (đường dẫn tới file, ví dụ `.tauri/updater.key`, **hoặc** nội dung key), và `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` nếu key có mật khẩu. Tạo cặp key: `pnpm exec tauri signer generate -w .tauri/updater.key`, đồng bộ public key: `pnpm run pubkey:sync`. Trên **GitHub Actions** dùng **Secrets** repo, không dùng `.env` — chi tiết: [docs/CI_CD_AUTO_UPDATE.md](./docs/CI_CD_AUTO_UPDATE.md).
+
+5. **E2E:** Playwright có thể cần `VITE_E2E=1` khi build cho test (xem [`playwright.config.ts`](./playwright.config.ts), [`vite.config.ts`](./vite.config.ts)).
+
 ## Tests
 
 - **Unit / component (Vitest + Testing Library):** `pnpm test` — `pnpm test:watch` khi dev.

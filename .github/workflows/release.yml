@@ -123,7 +123,20 @@ jobs:
             echo "::error::Khi dùng APPLE_CERTIFICATE cần KEYCHAIN_PASSWORD (secret)."
             exit 1
           fi
-          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          # Base64 từ GitHub Secret thường bị xuống dòng / khoảng trắng khi paste — strip trước khi decode
+          CERT_B64=$(printf '%s' "$APPLE_CERTIFICATE" | tr -d '\n\r\t ')
+          printf '%s' "$CERT_B64" | base64 --decode > certificate.p12
+          if [ ! -s certificate.p12 ]; then
+            echo "::error::Decode base64 thất bại hoặc rỗng — kiểm tra secret APPLE_CERTIFICATE (một dòng base64, openssl base64 -A)."
+            exit 1
+          fi
+          # Kiểm tra mật khẩu .p12 trước (env: tránh ký tự đặc biệt trong pass)
+          export P12_PASSWORD="${APPLE_CERTIFICATE_PASSWORD:-}"
+          if ! openssl pkcs12 -in certificate.p12 -nokeys -passin env:P12_PASSWORD -info >/dev/null 2>&1; then
+            echo "::error::Mật khẩu .p12 không khớp hoặc file .p12 hỏng. Kiểm tra APPLE_CERTIFICATE_PASSWORD (không thừa dấu cách/xuống dòng; đúng mật khẩu lúc export .p12 trên Mac)."
+            exit 1
+          fi
+          unset P12_PASSWORD
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
