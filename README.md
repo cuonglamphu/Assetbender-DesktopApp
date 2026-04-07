@@ -46,7 +46,12 @@ Implementation: [`src-tauri/src/paths.rs`](./src-tauri/src/paths.rs). Folder and
 
 4. **Ký bản build updater (local)** — khi build release có artifact updater: `TAURI_SIGNING_PRIVATE_KEY` (đường dẫn tới file, ví dụ `.tauri/updater.key`, **hoặc** nội dung key), và `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` nếu key có mật khẩu. Tạo cặp key: `pnpm exec tauri signer generate -w .tauri/updater.key`, đồng bộ public key: `pnpm run pubkey:sync`. Trên **GitHub Actions** dùng **Secrets** repo, không dùng `.env` — chi tiết: [docs/CI_CD_AUTO_UPDATE.md](./docs/CI_CD_AUTO_UPDATE.md).
 
-5. **E2E:** Playwright có thể cần `VITE_E2E=1` khi build cho test (xem [`playwright.config.ts`](./playwright.config.ts), [`vite.config.ts`](./vite.config.ts)).
+5. **Apple `.p12` → secret `APPLE_CERTIFICATE` (CI):** copy file `.p12` (export từ Mac) sang máy Windows, rồi tạo base64 **một dòng** bằng OpenSSL (tránh Notepad / BOM / CRLF):
+   - **Git Bash hoặc WSL:** `bash scripts/encode-p12-for-github.sh path/to/cert.p12` → ra file `cert.github-b64.txt`.
+   - **PowerShell (thường cần [Git for Windows](https://git-scm.com/download/win) để có `openssl`):** `pwsh -File scripts/encode-p12-for-github.ps1 path\to\cert.p12`
+   Dán **một dòng** vào GitHub → Secrets → `APPLE_CERTIFICATE`, hoặc: `gh secret set APPLE_CERTIFICATE < cert.github-b64.txt`. Mật khẩu export `.p12` đặt riêng secret `APPLE_CERTIFICATE_PASSWORD`.
+
+6. **E2E:** Playwright có thể cần `VITE_E2E=1` khi build cho test (xem [`playwright.config.ts`](./playwright.config.ts), [`vite.config.ts`](./vite.config.ts)).
 
 ## Tests
 
@@ -63,6 +68,8 @@ Implementation: [`src-tauri/src/paths.rs`](./src-tauri/src/paths.rs). Folder and
 | `pnpm run release -- <semver>` | Runs `version:sync`, `pubkey:sync`, commits, pushes the current branch, creates tag `v<semver>`, pushes the tag (triggers the GitHub Release workflow). Flags: `--dry-run` (no git writes), `--skip-push` (no push), `--all` (`git add -A`). Requires `git`, remote `origin`, and push rights. |
 | `pnpm run icons` | Regenerates app icons: `scripts/prepare-app-icon.py` → `tauri icon …` → `scripts/sync-web-icons.mjs`. |
 | `pnpm test:updater` | Validates the updater `latest.json` shape (and optional `--probe` to hit the endpoint). See script header for `UPDATER_MANIFEST_URL`. |
+| `bash scripts/encode-p12-for-github.sh <file.p12>` | Base64 một dòng (`openssl -A`) cho secret `APPLE_CERTIFICATE` — Git Bash / WSL / macOS. |
+| `pwsh -File scripts/encode-p12-for-github.ps1 <file.p12>` | Cùng mục đích trên Windows (dùng OpenSSL từ Git for Windows nếu có). |
 
 Implementation files live under [`scripts/`](./scripts/).
 

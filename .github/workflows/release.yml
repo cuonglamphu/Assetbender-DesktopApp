@@ -20,6 +20,21 @@
 # Cache (2 lớp — khuyến nghị Tauri + pnpm):
 #   - actions/setup-node cache: pnpm + cache-dependency-path: pnpm-lock.yaml (commit lockfile)
 #   - Swatinem/rust-cache@v2: workspaces src-tauri -> target; prefix-key release + key matrix target
+#
+# Notarization — ghi nhận thực tế (không phải lỗi workflow mỗi khi chậm):
+#   1) Log "Notarizing..." lâu có thể chỉ là hàng chờ Apple, không nhất thiết CI sai.
+#   2) Lần đầu notarize team/app thường chậm hơn hoặc vướng quyền/cấu hình phía Apple.
+#   3) Chỉ dựa vào notarytool --wait dễ "câm"; muốn thấy submit id + poll + log khi Invalid:
+#      scripts/notarize-dmg-notarytool-poll.sh (submit → poll info mỗi 20s → notarytool log nếu Invalid → stapler).
+#      Tích hợp đầy đủ cần: tauri build **không** truyền APPLE_API_* (chỉ ký), chạy script, rồi upload asset
+#      (tauri-action gộp build+upload — tách bước hoặc gh release upload + latest.json theo tài liệu updater).
+# Ví dụ bước sau build (khi đã bỏ APPLE_API_* khỏi tauri build và có file .dmg + env từ Prepare):
+#   - run: bash scripts/notarize-dmg-notarytool-poll.sh
+#     if: matrix.platform == 'macos-latest'
+#     env:
+#       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+#       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+#       APPLE_API_KEY_PATH: ${{ env.APPLE_API_KEY_PATH }}
 
 name: Release
 
@@ -41,10 +56,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # --verbose: log rõ khi ký + notarize (notarytool submit --wait có thể vài phút; tránh cảm giác CI "treo").
           - platform: macos-latest
-            args: "--target aarch64-apple-darwin"
+            args: "--target aarch64-apple-darwin --verbose --verbose"
           - platform: macos-latest
-            args: "--target x86_64-apple-darwin"
+            args: "--target x86_64-apple-darwin --verbose --verbose"
           - platform: windows-latest
             args: ""
 
@@ -130,21 +146,27 @@ jobs:
             echo "::error::Decode base64 thất bại hoặc rỗng — kiểm tra secret APPLE_CERTIFICATE (một dòng base64, openssl base64 -A)."
             exit 1
           fi
-          # Kiểm tra mật khẩu .p12 trước (env: tránh ký tự đặc biệt trong pass)
+          # Mật khẩu chỉ qua env (tránh ký tự đặc biệt / khác biệt openssl vs security -P)
           export P12_PASSWORD="${APPLE_CERTIFICATE_PASSWORD:-}"
-          if ! openssl pkcs12 -in certificate.p12 -nokeys -passin env:P12_PASSWORD -info >/dev/null 2>&1; then
-            echo "::error::Mật khẩu .p12 không khớp hoặc file .p12 hỏng. Kiểm tra APPLE_CERTIFICATE_PASSWORD (không thừa dấu cách/xuống dòng; đúng mật khẩu lúc export .p12 trên Mac)."
-            exit 1
+          UNWRAPPED="${RUNNER_TEMP}/apple-cert-import.pem"
+          # Giải mã PKCS#12 bằng openssl rồi import PEM — tránh lỗi SecKeychainItemImport/MAC với một số .p12 khi dùng trực tiếp security import
+          if ! openssl pkcs12 -in certificate.p12 -nodes -passin env:P12_PASSWORD -out "$UNWRAPPED" 2>/dev/null; then
+            if ! openssl pkcs12 -legacy -in certificate.p12 -nodes -passin env:P12_PASSWORD -out "$UNWRAPPED" 2>/dev/null; then
+              echo "::error::openssl không giải mã được .p12 (sai mật khẩu, file hỏng, hoặc định dạng lạ). Thử: openssl pkcs12 -info -in cert.p12 -passin pass:... trên Mac; re-export .p12 từ Keychain."
+              openssl pkcs12 -in certificate.p12 -nodes -passin env:P12_PASSWORD -out "$UNWRAPPED" 2>&1 || true
+              exit 1
+            fi
           fi
-          unset P12_PASSWORD
+          rm -f certificate.p12
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
-          security import certificate.p12 -k build.keychain -P "${APPLE_CERTIFICATE_PASSWORD:-}" -T /usr/bin/codesign
+          security import "$UNWRAPPED" -k build.keychain -T /usr/bin/codesign -f
+          rm -f "$UNWRAPPED"
+          unset P12_PASSWORD
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
           security find-identity -v -p codesigning build.keychain
-          rm -f certificate.p12
 
           if [ -n "${APPLE_SIGNING_IDENTITY_INPUT:-}" ]; then
             {
