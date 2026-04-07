@@ -162,7 +162,8 @@ jobs:
           security default-keychain -s build.keychain
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security set-keychain-settings -t 3600 -u build.keychain
-          security import "$UNWRAPPED" -k build.keychain -T /usr/bin/codesign -f
+          # `-f` đứng một mình là sai: `security import -f` phải có format (pemseq, openssl, …). Bỏ `-f` để Keychain tự nhận PEM.
+          security import "$UNWRAPPED" -k build.keychain -T /usr/bin/codesign
           rm -f "$UNWRAPPED"
           unset P12_PASSWORD
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
