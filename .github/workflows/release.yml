@@ -190,6 +190,24 @@ jobs:
             fi
           fi
 
+      # Tránh NSURLError -1009 / "No network route" ngay lúc notarize: đợi outbound HTTPS tới Apple (runner đôi khi chậm sẵn sàng).
+      - name: Wait for outbound HTTPS to Apple (macOS)
+        if: matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 24); do
+            if curl -sfI --connect-timeout 20 --max-time 45 "https://appstoreconnect.apple.com" >/dev/null 2>&1 \
+              || curl -sfI --connect-timeout 20 --max-time 45 "https://developer.apple.com" >/dev/null 2>&1; then
+              echo "::notice::Outbound HTTPS tới Apple OK (lần $attempt)."
+              exit 0
+            fi
+            echo "::warning::Chưa có route HTTPS tới Apple (lần $attempt/24), chờ 15s..."
+            sleep 15
+          done
+          echo "::error::Sau ~6 phút vẫn không kết nối được tới Apple — kiểm tra GitHub Actions / mạng. Lỗi notarize hay gặp: NSURLError -1009."
+          exit 1
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -213,6 +231,8 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          # Tauri build (kể cả lỗi notarize -1009 tạm thời) được thử lại — xem README tauri-action.
+          retryAttempts: 3
           args: ${{ matrix.args }}
 
       - name: Verify macOS code signature and Gatekeeper

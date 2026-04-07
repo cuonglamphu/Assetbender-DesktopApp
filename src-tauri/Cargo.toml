@@ -1,6 +1,6 @@
 [package]
 name = "assetbender-mac"
-version = "0.4.1"
+version = "0.4.2"
 description = "AssetBender desktop client"
 authors = ["you"]
 edition = "2021"
